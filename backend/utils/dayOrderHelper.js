@@ -1,42 +1,53 @@
 const { google } = require("googleapis");
 const path = require("path");
-const dayjs = require("dayjs");
 require("dotenv").config();
 
-const spreadsheetId = process.env.VISIT_SHEET_ID;
-
 const auth = new google.auth.GoogleAuth({
-  keyFile: path.join(__dirname, "../credentials.json"),
-  scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+  keyFile: path.join(__dirname, "..", "credentials.json"),
+  scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
 });
 
-async function findSheetForToday() {
+const getDayOrderAndMonth = async () => {
   const client = await auth.getClient();
   const sheets = google.sheets({ version: "v4", auth: client });
 
-  const today = dayjs().format("DD-MM-YYYY");
+  const sheetId = process.env.DATE_SHEET_ID;
 
-  const metadata = await sheets.spreadsheets.get({ spreadsheetId });
-  const sheetTitles = metadata.data.sheets.map((s) => s.properties.title);
+  const dateRanges = [
+    { range: "DateSheet!A2:C100" }, // July
+    { range: "DateSheet!D2:F100" }, // August
+    { range: "DateSheet!G2:I100" }, // September
+    { range: "DateSheet!J2:L100" }, // October
+    { range: "DateSheet!M2:O100" }, // November
+  ];
 
-  for (const title of sheetTitles) {
+  const today = new Date();
+  const todayStr = `${today.getMonth() + 1}/${today.getDate()}/${today.getFullYear()}`;
+  const monthName = today.toLocaleString("default", { month: "long" });
+
+  for (let { range } of dateRanges) {
     const res = await sheets.spreadsheets.values.get({
-      spreadsheetId,
-      range: `${title}!G:G`,
+      spreadsheetId: sheetId,
+      range,
     });
-    const dates = res.data.values ? res.data.values.flat() : [];
 
-    for (const date of dates.slice(1)) {
-      const cleanDate = date ? String(date).trim() : "";
-
-      if (cleanDate === today) {
-        return title;
+    const rows = res.data.values || [];
+    for (let row of rows) {
+      const dateInSheet = row[0]?.trim();
+      if (dateInSheet === todayStr) {
+        const doValue = row[2];
+        return {
+          sheetName: `Day Order ${doValue}`,
+          month: monthName,
+          doNumber: doValue,
+          date: todayStr,
+        };
       }
     }
   }
 
-  console.log("No matching date found in any sheet.");
-  return null;
-}
+  console.error(`Today's date (${todayStr}) not found in DateSheet`);
+  return { error: "Today's date not found in the DateSheet." };
+};
 
-module.exports = { findSheetForToday };
+module.exports = { getDayOrderAndMonth };

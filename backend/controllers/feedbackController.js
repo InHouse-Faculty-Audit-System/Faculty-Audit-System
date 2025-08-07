@@ -1,60 +1,67 @@
 const { google } = require("googleapis");
 const path = require("path");
-const dayjs = require("dayjs");
-const { findSheetForToday } = require("../utils/dayOrderHelper");
+const { getDayOrderAndMonth } = require("../utils/dayOrderHelper");
 require("dotenv").config();
 
 const auth = new google.auth.GoogleAuth({
-  keyFile: path.join(__dirname, "../credentials.json"),
+  keyFile: path.join(__dirname, "..", "credentials.json"),
   scopes: ["https://www.googleapis.com/auth/spreadsheets"],
 });
 
-exports.addFeedbackForToday = async (req, res) => {
+const addFeedbackForToday = async (req, res) => {
+  const { faculty_id, feedback, visitTime } = req.body;
+
+  if (!faculty_id || !feedback || !visitTime) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
   try {
-    const { facultyId, remarks } = req.body;
-    if (!facultyId || !remarks) {
-      return res
-        .status(400)
-        .json({ message: "facultyId and remarks are required." });
-    }
-
-    const today = dayjs().format("DD-MM-YYYY");
-
-    const sheetName = await findSheetForToday();
-    if (!sheetName) {
-      return res.status(404).json({ message: "No audit scheduled for today." });
+    const { sheetName, date, error } = await getDayOrderAndMonth();
+    if (error) {
+      return res.status(404).json({ error });
     }
 
     const client = await auth.getClient();
     const sheets = google.sheets({ version: "v4", auth: client });
 
-    const resData = await sheets.spreadsheets.values.get({
-      spreadsheetId: process.env.VISIT_SHEET_ID,
-      range: `${sheetName}!C:C`,
+    const visitSheetId = process.env.VISIT_SHEET_ID;
+    const readRange = `${sheetName}!A2:H`; // Still read full row
+
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: visitSheetId,
+      range: readRange,
     });
 
-    const ids = resData.data.values ? resData.data.values.flat() : [];
+    const rows = response.data.values || [];
 
-    const rowIndex = ids.findIndex(
-      (id) => id && String(id).trim() === facultyId.trim()
+    // ✅ Match faculty_id in Column C (index 2)
+    const rowIndex = rows.findIndex(
+      row => row[2]?.toString().trim().toLowerCase() === faculty_id.trim().toLowerCase()
     );
+
     if (rowIndex === -1) {
-      return res
-        .status(404)
-        .json({ message: "Faculty ID not found in today's audit sheet." });
+      return res.status(200).json({ message: "No audit today for this faculty." });
     }
 
-    const targetRow = rowIndex + 1;
+    const targetRow = rowIndex + 2; // Adjust for header and 0-index
+    const updateRange = `${sheetName}!F${targetRow}:H${targetRow}`; // Date, Time, Feedback
+
     await sheets.spreadsheets.values.update({
-      spreadsheetId: process.env.VISIT_SHEET_ID,
-      range: `${sheetName}!H${targetRow}`,
+      spreadsheetId: visitSheetId,
+      range: updateRange,
       valueInputOption: "USER_ENTERED",
-      requestBody: { values: [[remarks]] },
+      requestBody: {
+        values: [[date, visitTime, feedback]],
+      },
     });
 
-    return res.json({ message: "Remarks added successfully." });
-  } catch (error) {
-    console.error("Error adding remarks:", error);
-    res.status(500).json({ message: "Server error." });
+    res.status(200).json({ message: "Feedback submitted successfully." });
+  } catch (err) {
+    console.error("Error submitting feedback:", err);
+    res.status(500).json({ error: "Internal server error." });
   }
+};
+
+module.exports = {
+  addFeedbackForToday,
 };

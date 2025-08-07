@@ -1,6 +1,6 @@
 const { google } = require("googleapis");
 const path = require("path");
-const { findSheetForToday } = require("../utils/dayOrderHelper");
+const { getDayOrderAndMonth } = require("../utils/dayOrderHelper");
 require("dotenv").config();
 
 const loginSheetId = process.env.LOGIN_SHEET_ID;
@@ -13,7 +13,10 @@ const auth = new google.auth.GoogleAuth({
 
 exports.loginAndCheckAudit = async (req, res) => {
   try {
-    const { facultyId, email } = req.body;
+    // Ensure strings and clean input
+    const facultyId = String(req.body.facultyId).trim();
+    const email = String(req.body.email).trim().toLowerCase();
+
     if (!facultyId || !email) {
       return res.status(400).json({ message: "facultyId and email required." });
     }
@@ -28,36 +31,43 @@ exports.loginAndCheckAudit = async (req, res) => {
     });
     const rows = data.data.values || [];
 
-    const found = rows.find(
-      (row) =>
-        row[0] &&
-        String(row[0]).trim() === facultyId.trim() &&
-        row[1] &&
-        String(row[1]).trim().toLowerCase() === email.trim().toLowerCase()
-    );
+    const found = rows.find((row) => {
+      const rowFacultyId = String(row[0] || "").trim();
+      const rowEmail = String(row[1] || "").trim().toLowerCase();
+      return rowFacultyId === facultyId && rowEmail === email;
+    });
 
     if (!found) {
       return res.status(401).json({ message: "Invalid faculty ID or email." });
     }
 
     // Check if faculty has audit today
-    const sheetName = await findSheetForToday();
+    const todayInfo = await getDayOrderAndMonth();
+if (!todayInfo) {
+  return res.status(404).json({ message: "Date not found in master sheet" });
+}
+
+const { sheetName, month } = todayInfo;
     let auditToday = false;
     let venue = null;
     let slot = null;
 
     if (sheetName) {
-      // Get facultyId (C) and venue (F)
       const resData = await sheets.spreadsheets.values.get({
         spreadsheetId: visitSheetId,
-        range: `${sheetName}!C:F`,
+        range: `${sheetName}!C:F`, // C: facultyId, D: slot, F: venue
       });
       const allRows = resData.data.values || [];
 
-      // Find matching facultyId
-      const matchingRow = allRows.find(
-        (row) => row[0] && String(row[0]).trim() === facultyId.trim()
-      );
+     const matchingRow = allRows.find((row) => {
+  const rowFacultyId = String(row[0] || "").trim();
+  const rowMonth = String(row[2] || "").toLowerCase(); // E column → Month
+  return (
+    rowFacultyId === facultyId &&
+    rowMonth.includes(month.toLowerCase())
+  );
+});
+
 
       if (matchingRow) {
         auditToday = true;
@@ -75,7 +85,7 @@ exports.loginAndCheckAudit = async (req, res) => {
       slot: auditToday ? slot : null,
     });
   } catch (error) {
-    console.error(error);
+    console.error("Login error:", error);
     res.status(500).json({ message: "Server error." });
   }
 };
