@@ -8,46 +8,59 @@ const auth = new google.auth.GoogleAuth({
 });
 
 const getDayOrderAndMonth = async () => {
-  const client = await auth.getClient();
-  const sheets = google.sheets({ version: "v4", auth: client });
+  try {
+    const client = await auth.getClient();
+    const sheets = google.sheets({ version: "v4", auth: client });
+    const sheetId = process.env.DATE_SHEET_ID;
 
-  const sheetId = process.env.DATE_SHEET_ID;
+    const dateRanges = [
+      "DateSheet!A2:C", "DateSheet!D2:F", "DateSheet!G2:I",
+      "DateSheet!J2:L", "DateSheet!M2:O"
+    ];
 
-  const dateRanges = [
-    { range: "DateSheet!A2:C100" }, // July
-    { range: "DateSheet!D2:F100" }, // August
-    { range: "DateSheet!G2:I100" }, // September
-    { range: "DateSheet!J2:L100" }, // October
-    { range: "DateSheet!M2:O100" }, // November
-  ];
+    const today = new Date();
+    // Use a robust way to get today's date in M/D/YYYY format
+    const todayStr = `${today.getMonth() + 1}/${today.getDate()}/${today.getFullYear()}`;
+    const monthName = today.toLocaleString("default", { month: "long" });
 
-  const today = new Date();
-  const todayStr = `${today.getMonth() + 1}/${today.getDate()}/${today.getFullYear()}`;
-  const monthName = today.toLocaleString("default", { month: "long" });
-
-  for (let { range } of dateRanges) {
-    const res = await sheets.spreadsheets.values.get({
-      spreadsheetId: sheetId,
-      range,
+    const responses = await sheets.spreadsheets.values.batchGet({
+        spreadsheetId: sheetId,
+        ranges: dateRanges
     });
 
-    const rows = res.data.values || [];
-    for (let row of rows) {
-      const dateInSheet = row[0]?.trim();
-      if (dateInSheet === todayStr) {
-        const doValue = row[2];
-        return {
-          sheetName: `Day Order ${doValue}`,
-          month: monthName,
-          doNumber: doValue,
-          date: todayStr,
-        };
-      }
+    if (responses.data.valueRanges) {
+        for (const range of responses.data.valueRanges) {
+            const rows = range.values || [];
+            for (const row of rows) {
+                const dateInSheet = row[0]?.trim();
+                // Check if the date matches
+                if (dateInSheet === todayStr) {
+                    const doValue = row[2]?.trim();
+                    // If a Day Order value exists for this date, return it
+                    if (doValue) {
+                        return {
+                            sheetName: `Day Order ${doValue}`,
+                            month: monthName,
+                            doNumber: doValue,
+                            date: todayStr,
+                        };
+                    }
+                    // If the date matches but DO is empty, we can stop and return null
+                    console.log(`Date ${todayStr} found, but no Day Order is assigned.`);
+                    return null;
+                }
+            }
+        }
     }
-  }
+    
+    // If we finish all loops and never find the date
+    console.log(`Today's date (${todayStr}) was not found in the DateSheet.`);
+    return null;
 
-  console.error(`Today's date (${todayStr}) not found in DateSheet`);
-  return { error: "Today's date not found in the DateSheet." };
+  } catch (error) {
+      console.error("Error in getDayOrderAndMonth:", error);
+      return null; // Ensure it always returns null on error
+  }
 };
 
 module.exports = { getDayOrderAndMonth };

@@ -2,7 +2,12 @@ import React, { useState } from "react";
 import { Mail, User, LogIn, AlertCircle } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 
-const LoginPage: React.FC = () => {
+// Add the onAdminClick prop
+interface LoginPageProps {
+  onAdminClick: () => void;
+}
+
+const LoginPage: React.FC<LoginPageProps> = ({ onAdminClick }) => {
   const [email, setEmail] = useState("");
   const [facultyId, setFacultyId] = useState("");
   const [error, setError] = useState("");
@@ -106,6 +111,13 @@ const LoginPage: React.FC = () => {
             </button>
           </form>
         </div>
+        {/* 3. Add this new div for the admin link */}
+        <div className="text-center">
+          <button onClick={onAdminClick} className="text-sm text-blue-600 hover:underline">
+            Are you an admin?
+          </button>
+        </div>
+        
       </div>
     </div>
   );
